@@ -68,6 +68,20 @@ rows.forEach((r: any, i: number) => {
 ok(new Set(rows.map((r: any) => r.implied_value_usd)).size > 1, 'not all equal');
 ok(snap.watchlist.every((s: string) => seen.has(s)), 'watchlist 40/40');
 const counts = Radar.counts(R); ok(Object.values(counts).reduce((a: number, b: any) => a + b, 0) === snap.protocols.length, 'ledger sums');
+// worth-farming strip: the page calls Radar.worthFarming(); recompute it here from the rows board.json carries
+// (verdict rule, counts, top 5 by net / hour, and the #1-row "why SKIP" arithmetic) so the strip can't drift from the file.
+const WF = Radar.worthFarming(R, null, SCEN.dropShare, SCEN.weeks, 5);
+const plans = R.board.map((b: any) => Radar.farmPlan(b, null, SCEN.dropShare, SCEN.weeks, R.exitX));
+plans.forEach((p: any, i: number) => {
+  ok(p.verdict === (p.net <= 0 ? 'SKIP' : p.perHour >= 25 ? 'FARM' : 'MARGINAL') && rows[i].verdict === p.verdict, 'verdict rule ' + rows[i].slug);
+  ok(Math.abs(p.drop - p.costs - p.forgone - p.net) < 1e-6, 'net = drop − costs − forgone ' + rows[i].slug);
+});
+const vc: any = { FARM: 0, MARGINAL: 0, SKIP: 0 }; rows.forEach((r: any) => vc[r.verdict]++);
+ok(['FARM', 'MARGINAL', 'SKIP'].every(k => vc[k] === WF.counts[k]), 'worthFarming counts = board.json counts');
+const top5 = rows.map((r: any, i: number) => ({ slug: r.slug, rank: r.rank, ph: plans[i].perHour })).filter((o: any, i: number) => rows[i].verdict === 'FARM')
+  .sort((a: any, b: any) => b.ph - a.ph || a.rank - b.rank).slice(0, 5).map((o: any) => o.slug);
+ok(top5.join() === WF.top.map((o: any) => o.b.slug).join(), 'worthFarming top 5 = board.json FARM rows by net/hour');
+ok(WF.lead.b.slug === rows[0].slug, 'strip explains board #1');
 let dashBytes = 0, names = 0; const kinds = new Set<string>();
 for (const f of readdirSync(join(HERE, 'dashboard'))) {
   const t = readFileSync(join(HERE, 'dashboard', f), 'utf8'); dashBytes += Buffer.byteLength(t); kinds.add(f.split('.').pop()!);
@@ -101,4 +115,4 @@ writeFileSync(join(OUT, 'data.js'), 'window.RADAR_DATA = ' + JSON.stringify(data
 // ---- dossier last ----
 if (shots.length) writeFileSync(join(OUT, 'dossier.json'), buildDossier(OUT, { text_max_bytes: 65536, screenshots: { max: 4, max_bytes: 524288 }, dashboard: { max_files: 400, max_bytes: 4194304 } }));
 const v = rows.reduce((a: any, r: any) => (a[r.verdict] = (a[r.verdict] || 0) + 1, a), {});
-console.log(`ok: ${rows.length} rows · ledger ${JSON.stringify(counts)} · verdicts ${JSON.stringify(v)} · dashboard ${dashBytes} B · value kept [${R.value.kept}] · odds kept [${R.odds.kept}]`);
+console.log(`ok: ${rows.length} rows · ledger ${JSON.stringify(counts)} · verdicts ${JSON.stringify(v)} · worth farming top 5 [${top5.join(', ')}] · dashboard ${dashBytes} B · value kept [${R.value.kept}] · odds kept [${R.odds.kept}]`);

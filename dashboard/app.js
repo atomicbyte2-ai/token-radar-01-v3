@@ -4,7 +4,7 @@
   var D = window.RADAR_DATA, Rd = window.Radar, M = Rd.money;
   var snap = { as_of: D.as_of, source: D.source, floor_usd: D.floor_usd, watchlist: D.watchlist,
     protocols: D.protocols.map(function (a) { return { slug: a[0], name: a[1], category: a[2], chains: a[3], tvl_usd: a[4], change_7d: a[5], mcap_usd: a[6], listed_at: a[7], gecko_id: a[8], symbol: a[9] }; }) };
-  var R = Rd.run(snap);                       // the whole model, refitted here in the browser
+  var R = Rd.run(snap); // the whole model, refitted here in the browser
   var WL = {}; snap.watchlist.forEach(function (s) { WL[s] = 1; });
   var COLORS = { watch: '#6cc6d8', early: '#b39ddb', priced: '#f0b44c', nocap: '#a0855a', above: '#5d7a72', bridge: '#3e4f57', lst: '#4b5d66', cex: '#56666d', ver: '#6b7a80' };
   var DEF = { tab: 'board', verdict: 'ALL', tier: 'ALL', q: '', cat: '', chain: '', dep: 'plan', share: Math.round(D.scenario.dropShare * 1000) / 10, weeks: D.scenario.weeks, sort: 'rank', dir: 1, p: '' };
@@ -31,11 +31,12 @@
     location.hash.replace(/^#/, '').split('&').forEach(function (kv) {
       var i = kv.indexOf('='); if (i < 0) return;
       var k = decodeURIComponent(kv.slice(0, i)), v = decodeURIComponent(kv.slice(i + 1));
-      if (k in DEF) S[k] = typeof DEF[k] === 'number' ? +v : v;
+      if (k === 'dir') S.dir = v === 'desc' || +v < 0 ? -1 : 1;
+      else if (k in DEF) S[k] = typeof DEF[k] === 'number' ? +v : v;
     });
   }
   function writeHash() {
-    var parts = []; Object.keys(DEF).forEach(function (k) { if (S[k] !== DEF[k] && S[k] !== '') parts.push(k + '=' + encodeURIComponent(S[k])); });
+    var parts = []; Object.keys(DEF).forEach(function (k) { if (S[k] !== DEF[k] && S[k] !== '') parts.push(k + '=' + (k === 'dir' ? (S.dir < 0 ? 'desc' : 'asc') : encodeURIComponent(S[k]))); });
     history.replaceState(null, '', '#' + parts.join('&')); render();
   }
 
@@ -110,11 +111,11 @@
       return true;
     });
     var key = { rank: function (o) { return o.b.rank; }, tvl: function (o) { return o.b.f.p.tvl_usd; }, g7: function (o) { return o.b.f.p.change_7d || 0; }, age: function (o) { return o.b.f.yrs; },
-      odds: function (o) { return o.b.odds; }, ifl: function (o) { return o.b.ifLaunch; }, implied: function (o) { return o.b.implied; }, net: function (o) { return o.pl.net; }, ph: function (o) { return o.pl.perHour; }, name: function (o) { return o.b.name.toLowerCase(); } }[S.sort] || function (o) { return o.b.rank; };
+      odds: function (o) { return o.b.odds; }, ifl: function (o) { return o.b.ifLaunch; }, implied: function (o) { return o.b.implied; }, net: function (o) { return o.pl.net; }, nph: function (o) { return o.pl.perHour; }, name: function (o) { return o.b.name.toLowerCase(); } }[S.sort] || function (o) { return o.b.rank; };
     rows.sort(function (a, c) { var x = key(a), y = key(c); return (x < y ? -1 : x > y ? 1 : a.b.rank - c.b.rank) * S.dir; });
     return rows;
   }
-  var SORTNAME = { rank: 'rank', tvl: 'TVL', g7: '7-day change', age: 'no-token age', odds: 'token odds', ifl: 'value if it launches', implied: 'implied value', net: 'net of fees', ph: 'net / hour', name: 'name' };
+  var SORTNAME = { rank: 'rank', tvl: 'TVL', g7: '7-day change', age: 'no-token age', odds: 'token odds', ifl: 'value if it launches', implied: 'implied value', net: 'net of fees', nph: 'net / hour', name: 'name' };
 
   function controls() {
     function seg(key, opts) { return '<span class="seg">' + opts.map(function (o) { return '<button data-k="' + key + '" data-v="' + o[0] + '" class="' + (String(S[key]) === String(o[0]) ? 'on' : '') + '">' + o[1] + '</button>'; }).join('') + '</span>'; }
@@ -129,13 +130,23 @@
       '<label class="sl">horizon <input type="range" min="2" max="26" step="1" data-k="weeks" value="' + S.weeks + '"><b>' + S.weeks + ' wk</b></label>' +
       '<button class="b" data-act="reset">Reset</button><button class="b" data-act="csv">CSV export</button></div>' : '');
   }
+  // ---- worthFarming(): top 5 FARM rows by net / hour, recomputed for the live scenario ----
+  function worthStrip() {
+    var W = Rd.worthFarming(R, S.dep === 'plan' ? null : +S.dep, S.share / 100, S.weeks, 5), L = W.lead, lp = L.pl, lt = L.b.f.p.tvl_usd;
+    var cards = W.top.map(function (o, i) {
+      return '<button class="wf" data-pp="' + esc(o.b.slug) + '"><span class="wi">' + (i + 1) + '</span><b>' + esc(o.b.name) + '</b><span class="sub">rank #' + o.b.rank + '</span><span class="pos mono">' + M(o.pl.net) + ' net</span><span class="mono">' + M(o.pl.perHour) + ' / h</span></button>';
+    }).join('') || '<span class="sub">No row clears $25 / hour in this scenario — raise the drop share or deposit.</span>';
+    return '<div class="worth"><div class="wh"><h2>Worth farming in this scenario</h2><span class="sub">top 5 FARM by net / hour · ' + W.counts.FARM + ' FARM · ' + W.counts.MARGINAL + ' marginal · ' + W.counts.SKIP + ' skip</span></div><div class="wl">' + cards + '</div>' +
+      '<p class="why">Why the biggest pools say SKIP: a ' + M(lp.deposit) + ' deposit in ' + esc(L.b.name) + ' (#1, TVL ' + short(lt) + ') is ' + pct(lp.deposit / (lt + lp.deposit), 4) + ' of the pool, so its ' + short(L.b.implied) + ' implied value × ' + S.share + '% drop share pays ' + M(lp.drop) +
+      ' — less than ' + M(lp.costs) + ' fees + ' + M(lp.forgone) + ' forgone T-bill yield. Small pools give a deposit a bigger slice; the board stays ranked by implied value.</p></div>';
+  }
   function boardTable() {
     var rows = filtered(), cap = '';
     if (S.verdict !== 'ALL' || S.tier !== 'ALL' || S.q || S.cat || S.chain || S.sort !== 'rank')
       cap = '<div class="cap">Filtered to ' + [S.verdict !== 'ALL' ? 'verdict ' + S.verdict : '', S.tier === 'WATCH' ? 'watchlist' : S.tier === 'EARLY' ? 'early' : '', S.cat, S.chain, S.q ? '“' + esc(S.q) + '”' : ''].filter(Boolean).join(' · ') +
-        ' — ' + rows.length + ' of ' + R.board.length + ' · sorted by ' + SORTNAME[S.sort] + (S.dir < 0 ? ' ↓' : ' ↑') + '</div>';
+        ' — ' + rows.length + ' of ' + R.board.length + ' · sorted by ' + SORTNAME[S.sort] + (S.dir < 0 ? ', high → low ↓' : ', low → high ↑') + '</div>';
     function th(k, t, cls) { return '<th class="s ' + (cls || '') + (S.sort === k ? ' on' : '') + '" data-sort="' + k + '">' + t + (S.sort === k ? (S.dir < 0 ? ' ↓' : ' ↑') : '') + '</th>'; }
-    var h = '<tr>' + th('rank', '#') + th('name', 'protocol') + th('tvl', 'TVL', 'num') + th('g7', '7D', 'num') + th('age', 'no-token age', 'num') + th('odds', 'odds') + th('ifl', 'if it launches', 'num') + th('implied', 'implied value · P25–P75', 'num') + th('net', 'verdict · net', '') + th('ph', 'net / h', 'num') + '</tr>';
+    var h = '<tr>' + th('rank', '#') + th('name', 'protocol') + th('tvl', 'TVL', 'num') + th('g7', '7D', 'num') + th('age', 'no-token age', 'num') + th('odds', 'odds') + th('ifl', 'if it launches', 'num') + th('implied', 'implied value · P25–P75', 'num') + th('net', 'verdict · net', '') + th('nph', 'net / h', 'num') + '</tr>';
     var hiAll = Math.log(R.board[0].hi75), loAll = Math.log(Math.max(1, R.board[R.board.length - 1].lo25));
     function pos(v) { return 100 * (Math.log(Math.max(1, v)) - loAll) / (hiAll - loAll); }
     var body = rows.slice(0, 30).map(function (o) {
@@ -145,9 +156,9 @@
         '<td class="num">' + short(p.tvl_usd) + '</td><td class="num ' + (g == null ? '' : g >= 0 ? 'pos' : 'neg') + '">' + (g == null ? '—' : (g >= 0 ? '+' : '') + g.toFixed(1) + '%') + '</td><td class="num">' + age(b.f) + '</td>' +
         '<td class="mono"><span class="odds"><i style="width:' + pct(b.odds) + '"></i></span>' + pct(b.odds) + '</td><td class="num">' + short(b.ifLaunch) + '</td>' +
         '<td class="num">' + short(b.implied) + ' <span class="sub">' + short(b.lo25) + '–' + short(b.hi75) + '</span><span class="strip"><i style="left:' + pos(b.lo25) + '%;width:' + (pos(b.hi75) - pos(b.lo25)) + '%"></i><b style="left:' + pos(b.implied) + '%"></b></span></td>' +
-        '<td><span class="v ' + pl.verdict + '">' + pl.verdict + '</span><span class="vn">' + M(pl.net) + '</span></td><td class="num ' + (pl.perHour >= 25 ? 'pos' : pl.perHour < 0 ? 'neg' : '') + '">' + M(pl.perHour) + '</td></tr>';
+        '<td><span class="v ' + pl.verdict + '">' + pl.verdict + '</span><span class="vn">' + M(pl.net) + '</span></td><td class="num ' + (pl.perHour >= 25 ? 'pos' : pl.perHour < 0 ? 'mu' : '') + '">' + M(pl.perHour) + '</td></tr>';
     }).join('');
-    return cap + '<table class="board">' + h + body + '</table>' + (rows.length > 30 ? '<div class="more">+ ' + (rows.length - 30) + ' more rows — narrow with the filters or export CSV</div>' : '');
+    return (cap ? '' : worthStrip()) + cap + '<table class="board">' + h + body + '</table>' + (rows.length > 30 ? '<div class="more">+ ' + (rows.length - 30) + ' more rows — narrow with the filters or export CSV</div>' : '');
   }
   function pricedTable() {
     var rows = R.peers.map(function (r) { return { r: r, m: Math.exp(R.value.model.predict(r)) }; }).sort(function (a, b) { return b.r.p.mcap_usd - a.r.p.mcap_usd; });
@@ -184,13 +195,14 @@
       '<tr><td>P25–P75 · P10–P90 (held-out misses)</td><td class="num">' + short(b.lo25) + '–' + short(b.hi75) + ' · ' + short(b.lo10) + '–' + short(b.hi90) + '</td></tr></table>';
     var peers = Rd.nearestPeers(R, b, 5).map(function (x) { return '<tr><td>' + esc(x.name) + ' <span class="sub">' + esc(x.symbol || '') + '</span></td><td class="num">' + short(x.tvl) + '</td><td class="num">' + short(x.cap) + '</td><td class="num">' + x.ratio.toFixed(2) + '</td><td class="num">×' + x.vsModel.toFixed(2) + '</td></tr>'; }).join('');
     var steps = pl.steps.map(function (s) { return '<li><span class="w">' + esc(s.when) + '</span><span>' + esc(s.text) + '</span><span class="c"><span>COST ' + M(s.cost) + '</span><span>TIME ' + s.min + ' min</span></span></li>'; }).join('');
-    var tb = pl.deposit * Rd.TBILL * S.weeks / 52;
+    var tb = pl.deposit * Rd.TBILL * S.weeks / 52, W = Rd.worthFarming(R, deposit(b), S.share / 100, S.weeks, 999), wi = W.top.map(function (o) { return o.b.slug; }).indexOf(b.slug);
+    var wline = '<p class="note">' + (wi >= 0 ? 'Worth farming: #' + (wi + 1) + ' of ' + W.counts.FARM + ' FARM rows by net / hour in this scenario.' : 'Not in the ' + W.counts.FARM + ' FARM rows of this scenario.') + '</p>';
     return '<a class="back" href="#">← back to the board</a><div class="det"><div><div class="panel"><div class="dh"><h2>' + esc(p.name) + '</h2><span class="rk">#' + b.rank + '</span><span class="badge ' + (WL[b.slug] ? 'w">watchlist' : 'e">early') + '</span><span class="sub">' + esc(p.category) + ' · ' + p.chains.map(esc).join(', ') + '</span></div>' +
       '<div class="dk">' + [['TVL', short(p.tvl_usd)], ['7-day change', p.change_7d == null ? '—' : p.change_7d.toFixed(2) + '%'], ['listed since', p.listed_at || 'n/a'], ['no-token age', age(b.f)]].map(function (k) { return '<div class="kpi"><div class="k">' + k[0] + '</div><div class="v">' + k[1] + '</div></div>'; }).join('') + '</div>' +
       '<h2>How the figure is made</h2>' + math + '<h3>token odds, term by term (7-day growth and time listed enter here)</h3><table class="math">' + ot + '</table><p class="note">No token is recorded for ' + esc(p.name) + ' on DefiLlama; odds are the share of protocols like it that record one, not a forecast that it will.</p></div>' +
       '<div class="panel" style="margin-top:12px"><h2>farmPlan() · ' + pl.steps.length + ' steps, ' + pl.hours.toFixed(1) + ' h, ' + M(pl.costs) + ' in fees</h2><ul class="steps">' + steps + '</ul></div></div>' +
-      '<div><div class="panel"><h2>Farm verdict</h2><div class="vbox"><span class="v ' + pl.verdict + '">' + pl.verdict + '</span> <span class="big ' + (pl.net > 0 ? 'pos' : 'neg') + '">' + M(pl.net) + '</span> <span class="sub">net · ' + M(pl.perHour) + ' / hour</span>' +
-      '<table class="math" style="margin-top:6px"><tr><td>deposit on ' + esc(pl.chain) + '</td><td class="num">' + M(pl.deposit) + '</td></tr><tr><td>modelled drop = implied × ' + S.share + '% × deposit ÷ (TVL + deposit)</td><td class="num">' + M(pl.drop) + '</td></tr><tr><td>− gas + bridge (' + M(pl.gas) + ' per tx)</td><td class="num">' + M(pl.costs) + '</td></tr><tr><td>− forgone T-bill ' + pct(Rd.TBILL) + ' × ' + S.weeks + ' wk</td><td class="num">' + M(pl.forgone) + '</td></tr><tr class="t"><td>net</td><td class="num">' + M(pl.net) + '</td></tr></table></div>' +
+      '<div><div class="panel"><h2>Farm verdict</h2><div class="vbox"><span class="v ' + pl.verdict + '">' + pl.verdict + '</span> <span class="big ' + (pl.net > 0 ? 'pos' : 'mu') + '">' + M(pl.net) + '</span> <span class="sub">net · ' + M(pl.perHour) + ' / hour</span>' +
+      '<table class="math" style="margin-top:6px"><tr><td>deposit on ' + esc(pl.chain) + '</td><td class="num">' + M(pl.deposit) + '</td></tr><tr><td>modelled drop = implied × ' + S.share + '% × deposit ÷ (TVL + deposit)</td><td class="num">' + M(pl.drop) + '</td></tr><tr><td>− gas + bridge (' + M(pl.gas) + ' per tx)</td><td class="num">' + M(pl.costs) + '</td></tr><tr><td>− forgone T-bill ' + pct(Rd.TBILL) + ' × ' + S.weeks + ' wk</td><td class="num">' + M(pl.forgone) + '</td></tr><tr class="t"><td>net</td><td class="num">' + M(pl.net) + '</td></tr></table>' + wline + '</div>' +
       '<h3>net by drop share × deposit</h3><table class="sg">' + grid + '</table>' +
       '<h3>benchmarks</h3><table class="math"><tr><td>same money in T-bills, ' + S.weeks + ' weeks</td><td class="num">' + M(tb) + '</td></tr><tr><td>drop share that just covers fees + T-bill</td><td class="num">' + pct(pl.breakeven, 1) + '</td></tr></table>' +
       '<h3>nearest priced peers</h3><table class="ev"><tr><th>token</th><th class="num">TVL</th><th class="num">cap</th><th class="num">cap/TVL</th><th class="num">cap ÷ model</th></tr>' + peers + '</table></div></div></div>';
@@ -210,7 +222,8 @@
     var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' })); a.download = 'token-radar-' + D.as_of + '.csv'; a.click();
   }
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('[data-sort],[data-k],[data-act],tr[data-p]'); if (!t) return;
+    var t = e.target.closest('[data-sort],[data-k],[data-act],[data-pp],tr[data-p]'); if (!t) return;
+    if (t.dataset.pp) { S.p = t.dataset.pp; writeHash(); window.scrollTo(0, 0); return; }
     if (t.dataset.sort) { if (S.sort === t.dataset.sort) S.dir = -S.dir; else { S.sort = t.dataset.sort; S.dir = t.dataset.sort === 'rank' || t.dataset.sort === 'name' ? 1 : -1; } writeHash(); }
     else if (t.tagName === 'BUTTON' && t.dataset.k) { S[t.dataset.k] = t.dataset.v; writeHash(); }
     else if (t.dataset.act === 'reset') { location.hash = ''; }

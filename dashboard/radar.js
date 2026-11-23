@@ -254,11 +254,9 @@
 
   // ---------- is the printed range honest? walk-forward coverage ----------
   function heldOut(peers, kept) {
-    // each later peer gets a band built only from the misses of peers listed before it
     var wm = walkMisses(peers, kept), in50 = 0, in80 = 0;
     wm.forEach(function (o) {
-      // the band printed on the board is built from leave-one-out misses, so test it the same way:
-      // leave-one-out misses inside the earlier peers only, then see if the later peer lands inside
+      // the board band uses leave-one-out misses, so rebuild it the same way from earlier peers only
       var res = looMisses(o.tr, kept);
       // a miss is pred - actual; actual inside band  <=>  res inside [q_lo, q_hi]
       if (o.res >= quantile(res, 0.25) && o.res <= quantile(res, 0.75)) in50++;
@@ -385,7 +383,16 @@
     });
   }
 
-  var api = { run: run, ledger: ledger, fitValue: fitValue, fitOdds: fitOdds, heldOut: heldOut, farmPlan: farmPlan, stepText: stepText,
+  // worthFarming(): the n best FARM rows by net / hour for one scenario, plus verdict counts.
+  // Same function feeds the page strip and main.ts's self-check.
+  function worthFarming(R, deposit, dropShare, weeks, n) {
+    var all = R.board.map(function (b) { return { b: b, pl: farmPlan(b, deposit, dropShare, weeks, R.exitX) }; }), c = { FARM: 0, MARGINAL: 0, SKIP: 0 };
+    all.forEach(function (o) { c[o.pl.verdict]++; });
+    var top = all.filter(function (o) { return o.pl.verdict === 'FARM'; }).sort(function (x, y) { return y.pl.perHour - x.pl.perHour || x.b.rank - y.b.rank; }).slice(0, n || 5);
+    return { top: top, counts: c, lead: all[0] };
+  }
+
+  var api = { run: run, worthFarming: worthFarming, ledger: ledger, fitValue: fitValue, fitOdds: fitOdds, heldOut: heldOut, farmPlan: farmPlan, stepText: stepText,
     defaultDeposit: defaultDeposit, nearestPeers: nearestPeers, counts: counts, cheapestChain: cheapestChain, money: money,
     mulberry32: mulberry32, quantile: quantile, median: median, GROUPS: GROUPS, TERM_LABEL: TERM_LABEL, GAS: GAS, BRIDGE_FEE: BRIDGE_FEE, TBILL: TBILL };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Radar = api;
